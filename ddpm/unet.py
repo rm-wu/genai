@@ -13,6 +13,8 @@ import os
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
+def exists(x):
+    return x is not None
 
 class ResidualBlock(eqx.Module):
     """
@@ -47,6 +49,7 @@ class ResidualBlock(eqx.Module):
             in_channels=in_channels,
             out_channels=out_channels,
             kernel_size=kernel_size,
+            padding=1,
             key=key,
         )
         self.norm = nn.GroupNorm(
@@ -61,7 +64,7 @@ class ResidualBlock(eqx.Module):
     ) -> Array:
         x = self.conv(x)
         x = self.norm(x)
-        if scale and shift:
+        if exists(scale) and exists(shift):
             x = x * (scale + 1) + shift
         x = self.act(x)
         return x
@@ -75,14 +78,15 @@ class ResNetBlock(eqx.Module):
     set).
     """
 
-    conv1: ResidualBlock
-    conv2: ResidualBlock
+    block1: ResidualBlock
+    block2: ResidualBlock
     res_conv: nn.Conv2d
+
     time_mlp: Optional[nn.MLP] = None
+    time_act: Optional[Callable] = None
     # takes the time embedding and outputs the scale and shift used to scale the
     # output of the Res
-    
-    
+
     def __init__(
         self,
         in_channels: int,
@@ -98,16 +102,16 @@ class ResNetBlock(eqx.Module):
         keys = jr.split(key, 4)
 
         # Initialize the two ResidualBlocks
-        self.conv1 = ResidualBlock(
+        self.block1 = ResidualBlock(
             in_channels=in_channels,
             out_channels=out_channels,
-            groutps=groups,
+            groups=groups,
             key=keys[0],
         )
-        self.conv2 = ResidualBlock(
+        self.block2 = ResidualBlock(
             in_channels=out_channels,
             out_channels=out_channels,
-            groutps=groups,
+            groups=groups,
             key=keys[1],
         )
 
@@ -124,18 +128,30 @@ class ResNetBlock(eqx.Module):
             self.res_conv = nn.Identity()
 
         if time_embedding_dim:
-            self.time_mlp = nn.Sequential(
-                jax.nn.silu,
-                nn.Linear(
-                    in_features=time_embedding_dim,
-                    out_features=out_channels * 2,
-                    key=keys[3],
-                ),
+            self.time_mlp = nn.Linear(
+                in_features=time_embedding_dim,
+                out_features=out_channels * 2,
+                key=keys[3],
             )
+            self.time_act = jax.nn.silu
 
     def __call__(self, x: Array, time_embedding: Optional[Array] = None) -> Array:
-        if time_embedding and self.time_mlp:
+        if (
+            exists(time_embedding)
+            and exists(self.time_mlp)
+            and exists(self.time_act)
+        ):
             time_embedding = self.time_mlp(time_embedding)
+            time_embedding = self.time_act(time_embedding)
+            scale, shift = jnp.split(time_embedding, 2, axis=0)
+            scale = jnp.reshape(scale, (-1, 1, 1))
+            shift = jnp.reshape(shift, (-1, 1, 1))
+
+        h = self.block1(x=x, scale=scale, shift=shift)
+        h = self.block2(x=h)
+        x = self.res_conv(x)
+        x = h + x
+        return x
 
 
 class UNet:
@@ -149,14 +165,16 @@ if __name__ == "__main__":
     x = np.random.randn(3, 32, 32)
     x = jnp.array(x)
 
-    residualblock = ResidualBlock(in_channels=3, out_channels=16, key=jax.random.PRNGKey(0))
+    residualblock = ResidualBlock(
+        in_channels=3, out_channels=16, key=jax.random.PRNGKey(0)
+    )
 
     ic(residualblock)
     ic(residualblock(x).shape)
 
-    resenetblock = ResNetBlock(
-        in_channels=3, 
-        out_channels=16, 
-        tmp_embedding_dim=16,
-        key=jax.random.PRNGKey(0))
-    
+    resnetblock = ResNetBlock(
+        in_channels=3, out_channels=16, time_embedding_dim=16, key=jax.random.PRNGKey(0)
+    )
+
+    ic(resnetblock)
+    ic(resnetblock(x, jnp.ones(16)).shape)
