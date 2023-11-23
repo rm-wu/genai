@@ -152,7 +152,6 @@ class ResNetBlock(eqx.Module):
 
 
 class Attention(eqx.Module):
-    
     def __init__(self):
         super.__init__()
         pass
