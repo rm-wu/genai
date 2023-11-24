@@ -194,10 +194,10 @@ def main(
         key=model_key,
     )
 
-    int_beta = lambda t: t
+    int_beta = lambda t: t ** 1.5
     weight_fn = lambda t: 1 - jnp.exp(-int_beta(t))
 
-    opt = optax.adam(learning_rate=lr) 
+    opt = optax.adabelief(learning_rate=lr) 
     opt_state = opt.init(eqx.filter(model, eqx.is_inexact_array))
 
     for step, batch in zip(pbar := trange(num_steps, ncols=80), 
