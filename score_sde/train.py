@@ -161,7 +161,7 @@ def main(
     # Model hyperparameters
     t_max: float = 10.,
     # Training hyperparameters
-    num_steps: int = 100_000, #1_000_000,
+    num_steps: int = 1_000_000, #1_000_000,
     lr: float = 3e-4,
     batch_size: int = 256,
     print_every: int = 1_000,
@@ -194,7 +194,8 @@ def main(
         key=model_key,
     )
 
-    int_beta = lambda t: t ** 1.5
+    # int_beta = lambda t: t ** 1.5
+    int_beta = lambda t: t
     weight_fn = lambda t: 1 - jnp.exp(-int_beta(t))
 
     opt = optax.adabelief(learning_rate=lr) 
